@@ -5,9 +5,9 @@ import { z } from 'zod';
 import postgres from 'postgres'
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import fs from 'fs/promises';
 import { put } from '@vercel/blob'; 
-import path from 'path';
+import crypto from 'crypto'; 
+
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
 
@@ -93,7 +93,7 @@ export async function createCustomer(prevState: State2, formData: FormData): Pro
         message: 'Customer already exists, please create a new customer or edit the existing customer.',
       };
     }
-
+    const customerId = crypto.randomUUID(); 
 
     const blob = await put(`customers/${Date.now()}-${customerImage.name}`, customerImage, {
       access: 'public',
@@ -102,8 +102,8 @@ export async function createCustomer(prevState: State2, formData: FormData): Pro
     const dbImagePath = blob.url; 
 
     await sql`
-      INSERT INTO customers (name, email, image_url)
-      VALUES (${customerName}, ${customerEmail}, ${dbImagePath})
+      INSERT INTO customers (id, name, email, image_url)
+      VALUES (${customerId}, ${customerName}, ${customerEmail}, ${dbImagePath})
     `;
   } catch (error) {
     console.error(error);
@@ -215,6 +215,7 @@ export async function updateInvoice( id: string,  prevState: State,  formData: F
   revalidatePath('/dashboard/invoices');
   redirect('/dashboard/invoices');
 }
+
 export async function updateCustomer(id: string, prevState: State2, formData: FormData): Promise<State2> {
   const imageFile = formData.get('image');
 
