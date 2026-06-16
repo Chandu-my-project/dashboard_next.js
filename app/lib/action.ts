@@ -113,7 +113,7 @@ export async function createCustomer(prevState: State2, formData: FormData): Pro
       message: 'Database Error: Failed to Create Customer.',
     };
   }
- 
+  revalidatePath('/dashboard/invoices/create'); 
   revalidatePath('/dashboard/customers');
   redirect('/dashboard/customers');
   
