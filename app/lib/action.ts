@@ -6,6 +6,7 @@ import postgres from 'postgres'
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import fs from 'fs/promises';
+import { put } from '@vercel/blob'; 
 import path from 'path';
 
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
@@ -60,15 +61,14 @@ export type State2 = {
   message?: string | null;
 };
 
-export async function createCustomer(prevState: State2, formData: FormData) {
-const imageFile = formData.get('image');
- const validatedFields  = CreateCustomer.safeParse({
+export async function createCustomer(prevState: State2, formData: FormData): Promise<State2> {
+  const imageFile = formData.get('image');
+  const validatedFields = CreateCustomer.safeParse({
     customerName: formData.get('name'),
     customerEmail: formData.get('email'),
     customerImage: imageFile,
   });
 
-   // If form validation fails, return errors early. Otherwise, continue.
   if (!validatedFields.success) {
     console.log(validatedFields);
     return {
@@ -77,51 +77,49 @@ const imageFile = formData.get('image');
     };
   }
 
-   const { customerName, customerEmail, customerImage } = validatedFields.data;
-    // Insert data into the database
+  const { customerName, customerEmail, customerImage } = validatedFields.data;
+    
   try {
-     // 1. Create a unique filename to prevent overwriting existing files
-    const uniqueFilename = `${Date.now()}-${customerImage.name}`;
-    
-    // 2. Define the absolute physical path on your server machine
-    const physicalPath = path.join(process.cwd(), 'public', 'customers', uniqueFilename);
-    
-    // 3. Define the web-accessible URL path for the database string
-    const dbImagePath = `/customers/${uniqueFilename}`;
-
-    // 4. Convert the browser File object into a node Buffer
-    const arrayBuffer = await customerImage.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // 5. Write the physical file to the disk
-    await fs.writeFile(physicalPath, buffer);
+   
     const existingCustomers = await sql`
-  SELECT name, email 
-  FROM customers 
-  WHERE name = ${customerName} OR email = ${customerEmail}
-`;
-  if (existingCustomers.length > 0) {
-  return {
-    errors: {}, // Keep the structure matching State2
-    message: 'Customer already exists, please create a new customer or edit the existing customer.',
-  };
-  }
+      SELECT name, email 
+      FROM customers 
+      WHERE name = ${customerName} OR email = ${customerEmail}
+    `;
 
-  await sql`
+    if (existingCustomers.length > 0) {
+      return {
+        errors: {}, 
+        message: 'Customer already exists, please create a new customer or edit the existing customer.',
+      };
+    }
+
+
+    const blob = await put(`customers/${Date.now()}-${customerImage.name}`, customerImage, {
+      access: 'public',
+    });
+
+    const dbImagePath = blob.url; 
+
+    await sql`
       INSERT INTO customers (name, email, image_url)
       VALUES (${customerName}, ${customerEmail}, ${dbImagePath})
     `;
   } catch (error) {
-    // If a database error occurs, return a more specific error.
+    console.error(error);
+    
     return {
+      errors: {},
       message: 'Database Error: Failed to Create Customer.',
     };
   }
  
-  // Revalidate the cache for the customer page and redirect the user.
   revalidatePath('/dashboard/customers');
   redirect('/dashboard/customers');
+  
+  return { errors: {}, message: null };
 }
+
 
 
 
@@ -220,7 +218,6 @@ export async function updateInvoice( id: string,  prevState: State,  formData: F
 
 export async function updateCustomer(id: string, prevState: State2, formData: FormData): Promise<State2> {
   const imageFile = formData.get('image');
-  
 
   const validatedFields = UpdateCustomerSchema.safeParse({
     customerName: formData.get('name'),
@@ -239,41 +236,41 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
   const { customerName, customerEmail, customerImage } = validatedFields.data;
   
   try {
-    // FIX 4: Secure duplicate check by ignoring the current customer's own ID
+   
     const existingCustomers = await sql`
       SELECT name, email 
       FROM customers 
-      WHERE ( name = ${customerName} OR email = ${customerEmail} ) AND id != ${id}
+      WHERE (name = ${customerName} OR email = ${customerEmail}) AND id != ${id}
     `;
 
     if (existingCustomers.length > 0) {
       return {
         errors: {}, 
-        message: 'Customer name or email already exist on another record.',
+        message: 'Customer name or email already exists on another record.',
       };
     }
 
-    // A: Query current image URL to use as fallback if no new image is provided
+    // 2. Query current image URL to use as fallback if no new image is provided
     const currentCustomer = await sql`
       SELECT image_url FROM customers WHERE id = ${id}
     `;
+    
     if (currentCustomer.length === 0) {
       return { errors: {}, message: 'Customer not found.' };
     }
+    
+    // Safely pull out the string path from row index 0
     let dbImagePath = currentCustomer[0].image_url;
 
-    // FIX 2: Only write to disk if a brand new file was actually selected
+   
     if (customerImage && customerImage.size > 0) {
-      const uniqueFilename = `${Date.now()}-${customerImage.name}`;
-      const physicalPath = path.join(process.cwd(), 'public', 'customers', uniqueFilename);
-      dbImagePath = `/customers/${uniqueFilename}`;
-
-      const arrayBuffer = await customerImage.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      await fs.writeFile(physicalPath, buffer);
+      const blob = await put(`customers/${Date.now()}-${customerImage.name}`, customerImage, {
+        access: 'public',
+      });
+      dbImagePath = blob.url; 
     }
 
-    // Execute update statement
+
     await sql`
       UPDATE customers
       SET name = ${customerName}, email = ${customerEmail}, image_url = ${dbImagePath}
@@ -281,7 +278,6 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
     `;
   } catch (error) {
     console.error(error);
-    // FIX 3: Added missing errors property to match State2 signature
     return {
       errors: {},
       message: 'Database Error: Failed to Update Customer.',
@@ -293,6 +289,7 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
   
   return { errors: {}, message: null };
 }
+
 
 
 export async function deleteInvoice(id: string) {
