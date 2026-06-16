@@ -215,7 +215,6 @@ export async function updateInvoice( id: string,  prevState: State,  formData: F
   revalidatePath('/dashboard/invoices');
   redirect('/dashboard/invoices');
 }
-
 export async function updateCustomer(id: string, prevState: State2, formData: FormData): Promise<State2> {
   const imageFile = formData.get('image');
 
@@ -236,7 +235,7 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
   const { customerName, customerEmail, customerImage } = validatedFields.data;
   
   try {
-   
+    // 1. Secure duplicate check by ignoring the current customer's own ID
     const existingCustomers = await sql`
       SELECT name, email 
       FROM customers 
@@ -259,10 +258,10 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
       return { errors: {}, message: 'Customer not found.' };
     }
     
-    // Safely pull out the string path from row index 0
+    // SAFE FIX: Extract string safely from row index position 0
     let dbImagePath = currentCustomer[0].image_url;
 
-   
+    // 3. Upload directly to Vercel Blob cloud if a new file exists
     if (customerImage && customerImage.size > 0) {
       const blob = await put(`customers/${Date.now()}-${customerImage.name}`, customerImage, {
         access: 'public',
@@ -270,14 +269,14 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
       dbImagePath = blob.url; 
     }
 
-
+    // 4. CASE-SENSITIVE FIX: Changed image_URL to lowercase image_url
     await sql`
       UPDATE customers
       SET name = ${customerName}, email = ${customerEmail}, image_url = ${dbImagePath}
       WHERE id = ${id}
     `;
   } catch (error) {
-    console.error(error);
+    console.error('DATABASE UPDATE ERROR LOG:', error); // Prints out errors safely to terminal logs
     return {
       errors: {},
       message: 'Database Error: Failed to Update Customer.',
@@ -289,6 +288,7 @@ export async function updateCustomer(id: string, prevState: State2, formData: Fo
   
   return { errors: {}, message: null };
 }
+
 
 
 
